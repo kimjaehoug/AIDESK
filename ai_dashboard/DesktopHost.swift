@@ -16,6 +16,7 @@ final class Host: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNav
     var embedded = !CommandLine.arguments.contains("--foreground")
     var backend: Process?
     var startupLog: URL?
+    var startupErrorShown = false
     var pinned = UserDefaults.standard.bool(forKey: "AI Desk Pinned")
     func applicationDidFinishLaunching(_ notification: Notification) {
         let menu = NSMenu()
@@ -47,7 +48,14 @@ final class Host: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNav
         window.minSize = NSSize(width: min(960, screen.width - 40), height: min(620, screen.height - 40))
         window.setFrameUsingName("AI Desk Desktop")
         // Saved monitor positions can be outside a different Mac's display.
-        if !NSScreen.screens.contains(where: { $0.visibleFrame.intersects(window.frame) }) { window.setFrame(frame, display: false) }
+        let target = NSScreen.screens.first(where: { $0.visibleFrame.intersects(window.frame) })?.visibleFrame ?? screen
+        window.minSize = NSSize(width: min(960, target.width - 24), height: min(620, target.height - 24))
+        var restored = window.frame
+        restored.size.width = min(max(window.minSize.width, restored.width), target.width - 24)
+        restored.size.height = min(max(window.minSize.height, restored.height), target.height - 24)
+        restored.origin.x = min(max(restored.minX, target.minX + 12), target.maxX - restored.width - 12)
+        restored.origin.y = min(max(restored.minY, target.minY + 12), target.maxY - restored.height - 12)
+        window.setFrame(restored, display: false)
         window.setFrameAutosaveName("AI Desk Desktop")
         window.isReleasedWhenClosed = false
         window.backgroundColor = .clear
@@ -83,7 +91,7 @@ final class Host: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNav
             let errorLog = try FileHandle(forWritingTo: log)
             try errorLog.seekToEnd()
             let process = Process(), output = Pipe()
-            process.executableURL = runtime.appendingPathComponent("bin/python3.14")
+            process.executableURL = runtime.appendingPathComponent("Resources/Python.app/Contents/MacOS/Python")
             process.arguments = ["-s", "-B", resources.appendingPathComponent("server.py").path, "--headless"]
             process.currentDirectoryURL = resources
             var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("PYTHON") }
@@ -112,12 +120,17 @@ final class Host: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNav
                     bytes.append(next)
                 }
                 guard let object = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
-                      let text = object["url"] as? String, let url = URL(string: text), url.host == "127.0.0.1" else { return }
+                      let text = object["url"] as? String, let url = URL(string: text), url.host == "127.0.0.1" else {
+                    DispatchQueue.main.async { self?.startupFailed("시작 응답을 읽지 못했습니다. 실행 기록을 확인해 주세요.") }
+                    return
+                }
                 DispatchQueue.main.async { self?.createWindow(url: url, foreground: object["foreground"] as? Bool ?? true) }
             }
         } catch { startupFailed("실행을 시작하지 못했습니다. 앱을 응용 프로그램 폴더로 다시 복사해 주세요.") }
     }
     func startupFailed(_ text: String) {
+        guard !startupErrorShown else { return }
+        startupErrorShown = true
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "AI Desk를 열 수 없습니다"

@@ -3,7 +3,7 @@ import tempfile,os,sys,threading,json,urllib.request,urllib.error
 with tempfile.TemporaryDirectory() as folder:
  os.environ['AI_DESK_DATA']=folder
  import server
- http=server.HTTPServer(('127.0.0.1',0),server.Handler)
+ http=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
  threading.Thread(target=http.serve_forever,daemon=True).start()
  base=f'http://127.0.0.1:{http.server_port}'
  def request(path,data=None,auth=True,host=None):

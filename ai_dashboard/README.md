@@ -2,7 +2,7 @@
 
 ## 다른 Mac에 설치하기
 
-배포용 파일은 `dist/release/AI-Desk-1.0.0-universal.dmg`입니다. macOS 13 이상에서 Intel과 Apple Silicon을 지원하도록 구성했습니다. Python이 앱에 포함되고 첫 실행에 연결 준비 안내가 나옵니다. DMG 안의 앱을 응용 프로그램으로 드래그한 뒤 여세요. 현재 버전은 Developer ID 서명·Apple 공증 전이므로 다른 Mac에서 실행이 차단될 수 있습니다. 정식 배포 절차와 빌드 방법은 `DISTRIBUTION.md`, 사용자 안내는 `START_HERE.txt`에 있습니다.
+배포용 파일은 `dist/v1.0.1/AI-Desk-1.0.1-universal.dmg`입니다. macOS 13 이상에서 Intel과 Apple Silicon을 지원하도록 구성했습니다. Python이 앱에 포함되고 첫 실행에 연결 준비 안내가 나옵니다. DMG 안의 앱을 응용 프로그램으로 드래그한 뒤 여세요. 현재 버전은 Developer ID 서명·Apple 공증 전이므로 다른 Mac에서 실행이 차단될 수 있습니다. 정식 배포 절차와 빌드 방법은 `DISTRIBUTION.md`, 사용자 안내는 `START_HERE.txt`에 있습니다.
 
 바탕화면에 직접 표시되는 macOS 대시보드입니다. 제목줄 없는 macOS 전용 창을 일반 프로그램 뒤에 배치하고 각 Desktop Space에서 유지합니다. Python은 Todo 저장과 SSH 조회를 담당하며, 화면과 입력은 macOS WebKit과 AppKit이 처리합니다. 외부 웹사이트를 사용하지 않습니다.
 
@@ -98,3 +98,12 @@ Claude Code와 Cursor 메타데이터를 읽기 전용으로 표시합니다. Cl
 - Confirmed Markdown replaces the live preview. Conversation nodes are reused by message ID, so refreshes do not replay older replies, lose selections, or rebuild the entire view. Scrolling follows new content only when the reader is already near the bottom. Initial history is shown immediately with a short entrance transition.
 - Cards, session transitions, messages, calendar selections, dialogs, focus and hover states have motion. Waiting replies show animated dots and text reveals with a caret. OS Reduce Motion disables motion and typing delays.
 - Settings include animation and streaming toggles, three reveal speeds, and a local effect preview. Preferences are saved with the planner. Codex/Cursor and background updates use progressive saved history; their GUI/provider token streams are not directly available.
+
+
+## Codex 세션에 직접 메시지 보내기
+
+- Codex 세션을 선택하고 대화 화면의 **보내기**를 누릅니다. 실시간 터미널 연결 없이도 해당 세션 UUID로 메시지를 전달합니다.
+- 설치된 Codex의 `queue --thread … --message …` 기능을 사용합니다. 기존 로그인과 세션 설정을 그대로 사용하며, 실행 중인 작업이 있으면 다음 차례에 처리됩니다.
+- 한국어와 여러 줄 메시지를 지원합니다. 전송 확인에 실패하면 입력을 유지하고 오류를 표시합니다. 확인 시간 초과 시 자동 재전송하지 않습니다.
+- 로컬과 SSH를 지원합니다. 서버의 CLI가 `queue`를 지원하지 않으면 업데이트 안내가 표시됩니다. SSH 인증은 기존 연결을 재사용하고 메시지는 원격 명령 문자열에 넣지 않고 표준 입력으로 전달합니다.
+- 권한 요청과 실행 상태는 Codex 앱이나 **실시간 제어 연결**에서 확인합니다. Cursor의 메시지 전송은 아직 지원하지 않습니다.

@@ -10,10 +10,11 @@ import pathlib
 import plistlib
 import shutil
 import subprocess
+import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent
-VERSION = '1.0.0'
+VERSION = '1.0.1'
 PYTHON_VERSION = '3.14'
 MIN_MACOS = '13.0'
 SOURCES = ('server.py', 'model.py', 'session_io.py', 'runtime.py', 'pty_helper.py', 'index.html')
@@ -42,6 +43,8 @@ def bundle_python(source, contents):
     shutil.copy2(source / 'bin' / ('python' + PYTHON_VERSION), version / 'bin' / ('python' + PYTHON_VERSION))
     (version / 'Resources').mkdir()
     shutil.copy2(source / 'Resources/Info.plist', version / 'Resources/Info.plist')
+    # The macOS bin/python launcher spawns this executable even in headless mode.
+    shutil.copytree(source / 'Resources/Python.app', version / 'Resources/Python.app', symlinks=True)
     library = version / 'lib'
     library.mkdir()
     for item in (source / 'lib').glob('*.dylib'):
@@ -121,7 +124,7 @@ def main():
     plist = dict(CFBundleName='AI Desk', CFBundleDisplayName='AI Desk',
                  CFBundleIdentifier='org.aidesk.desktop', CFBundleExecutable='DesktopHost',
                  CFBundlePackageType='APPL', CFBundleShortVersionString=VERSION,
-                 CFBundleVersion='100', CFBundleIconFile='AppIcon', LSMinimumSystemVersion=MIN_MACOS,
+                 CFBundleVersion='101', CFBundleIconFile='AppIcon', LSMinimumSystemVersion=MIN_MACOS,
                  NSHighResolutionCapable=True, LSUIElement=False,
                  NSHumanReadableCopyright='AI Desk contributors')
     (contents / 'Info.plist').write_bytes(plistlib.dumps(plist))
@@ -138,9 +141,12 @@ def main():
     flags = ['--options', 'runtime', '--timestamp'] if args.identity else []
     for binary in binaries:
         run('/usr/bin/codesign', '--force', '--sign', identity, *flags, binary)
+    run('/usr/bin/codesign', '--force', '--sign', identity, *flags,
+        framework / 'Versions' / PYTHON_VERSION / 'Resources/Python.app')
     run('/usr/bin/codesign', '--force', '--sign', identity, *flags, framework)
     run('/usr/bin/codesign', '--force', '--sign', identity, *flags, contents / 'MacOS/DesktopHost')
     run('/usr/bin/codesign', '--force', '--sign', identity, *flags, app)
+    run(sys.executable, ROOT / 'tests/distribution_smoke.py', app)
     staging = output / 'Install AI Desk'
     staging.mkdir()
     shutil.copytree(app, staging / app.name, symlinks=True)

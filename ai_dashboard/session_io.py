@@ -120,7 +120,7 @@ def read_history(session):
 
 
 # Sent as a constant python -c argument so the PTY's stdin remains free for typing.
-REMOTE_LAUNCH_SOURCE = r'''import json,os,pathlib,re,shutil,sys
+REMOTE_LAUNCH_SOURCE = r'''import json,os,pathlib,re,shutil,subprocess,sys
 request=json.loads(sys.argv[1]);home=pathlib.Path.home();provider=request['provider'];sid=request['id']
 paths=[home/'.local/bin',home/'.npm-global/bin',home/'.npm/bin',home/'.volta/bin',home/'.bun/bin',pathlib.Path('/usr/local/bin')]
 def version_key(path):
@@ -147,11 +147,62 @@ if cwd:
  try:os.chdir(cwd)
  except OSError as error:
   print('AI Desk: 작업 폴더에 들어가지 못했습니다: '+str(error),file=sys.stderr,flush=True);sys.exit(126)
+if request.get('action')=='queue':
+ if provider!='Codex':raise ValueError('Codex 세션만 메시지 큐를 지원합니다.')
+ try:
+  result=subprocess.run([executable,'queue','--thread',sid,'--message='+request['text']],capture_output=True,text=True,timeout=30)
+  if result.returncode:
+   error=(result.stderr or result.stdout).strip()
+   if 'unrecognized subcommand' in error or 'unexpected argument' in error:
+    error='이 서버의 Codex는 세션 메시지 전송을 지원하지 않습니다. Codex CLI를 업데이트한 뒤 다시 보내세요.'
+   print(json.dumps({'error':error or 'Codex 메시지를 전달하지 못했습니다.'},ensure_ascii=False))
+  else:print(json.dumps({'queued':True,'message':'세션에 전달했습니다. 실행 중인 작업이 있으면 다음 차례에 처리됩니다.'},ensure_ascii=False))
+ except subprocess.TimeoutExpired:
+  print(json.dumps({'error':'Codex 전송 확인 시간이 초과되었습니다. 중복 전송을 피하려면 세션에서 수신 여부를 확인한 뒤 다시 보내세요.'},ensure_ascii=False))
+ sys.exit(0)
 args=[executable]+(['--resume',sid] if provider=='Claude' else ['resume',sid,'--no-alt-screen'] if provider=='Codex' else ['attach-session','-t','='+sid])
 if provider=='Claude' and request.get('prompt'):args.append(request['prompt'])
 print('AI Desk: '+provider+' 연결 · '+executable,flush=True)
 os.execvpe(executable,args,os.environ)
 '''
+
+def queue_codex_message(session,text):
+    """Queue one user message on Codex's shared daemon, without simulating TUI keys."""
+    if session.get('provider')!='Codex':raise ValueError('Codex 세션을 선택하세요.')
+    sid=session['id']
+    if not re.fullmatch(r'[a-fA-F0-9-]{36}',sid):raise ValueError('올바른 세션 ID가 아닙니다.')
+    if not isinstance(text,str) or not text.strip():raise ValueError('메시지를 입력하세요.')
+    text=text.replace('\r\n','\n').replace('\r','\n')
+    if any(ord(c)<32 and c not in '\n\t' for c in text) or '\x7f' in text:raise ValueError('메시지에 제어 문자가 포함되어 있습니다.')
+    if len(text.encode('utf-8'))>90000:raise ValueError('메시지가 너무 깁니다.')
+    host=session['host'];cwd=session.get('cwd','')
+    if host=='local':
+        executable=executable_for('Codex')
+        if not executable:raise ValueError('Codex 실행 도구를 찾지 못했습니다. Codex CLI를 설치하거나 설정에서 연결 준비를 확인하세요.')
+        args=[executable,'queue','--thread',sid,'--message='+text]
+        directory=cwd if cwd and pathlib.Path(cwd).is_dir() else str(HOME)
+        try:result=subprocess.run(args,cwd=directory,capture_output=True,text=True,timeout=30)
+        except subprocess.TimeoutExpired:raise RuntimeError('Codex 전송 확인 시간이 초과되었습니다. 중복 전송을 피하려면 세션에서 수신 여부를 확인한 뒤 다시 보내세요.') from None
+        if result.returncode:
+            error=(result.stderr or result.stdout).strip()
+            if 'unrecognized subcommand' in error or 'unexpected argument' in error:error='설치된 Codex는 세션 메시지 전송을 지원하지 않습니다. Codex CLI를 업데이트한 뒤 다시 보내세요.'
+            raise RuntimeError(error or 'Codex 메시지를 전달하지 못했습니다.')
+        return {'queued':True,'message':'세션에 전달했습니다. 실행 중인 작업이 있으면 다음 차례에 처리됩니다.'}
+    request=json.dumps({'provider':'Codex','id':sid,'cwd':cwd,'action':'queue','text':text},ensure_ascii=False)
+    # The message travels on stdin; it is never interpolated into the remote shell.
+    source=REMOTE_LAUNCH_SOURCE.replace('request=json.loads(sys.argv[1]);','request=json.load(sys.stdin);',1)
+    args=['ssh','-S',control_path(host),'-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=6',host,'python3 -c '+shlex.quote(source)]
+    try:result=subprocess.run(args,input=request,text=True,capture_output=True,timeout=40)
+    except subprocess.TimeoutExpired:raise RuntimeError('SSH 전송 확인 시간이 초과되었습니다. 세션에서 수신 여부를 확인한 뒤 다시 보내세요.') from None
+    if result.returncode:raise RuntimeError(result.stderr.strip() or 'SSH 세션에 메시지를 전달하지 못했습니다.')
+    for line in reversed(result.stdout.splitlines()):
+        try:value=json.loads(line)
+        except ValueError:continue
+        if not isinstance(value,dict):continue
+        if value.get('error'):raise RuntimeError(value['error'])
+        if value.get('queued') is True:return value
+    raise RuntimeError('서버에서 메시지 전송 확인을 받지 못했습니다. 세션에서 수신 여부를 확인하세요.')
+
 
 def session_command(session):
     provider=session['provider'];sid=session['id'];host=session['host'];cwd=session.get('cwd','')

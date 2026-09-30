@@ -33,6 +33,7 @@ def executable_for(provider):
         for base in (pathlib.Path('/Applications'), HOME / 'Applications'):
             for app in ('ChatGPT.app', 'Codex.app'):
                 candidates.append(base / app / 'Contents/Resources/codex')
+                candidates.append(base / app / 'Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex')
     for base in (HOME / '.vscode/extensions', HOME / '.cursor/extensions'):
         patterns = ('anthropic.claude-code-*/resources/native-binary/claude',) if provider == 'Claude' else (
             'openai.chatgpt-*/bin/*/codex', 'openai.chatgpt-*/resources/codex')
@@ -58,7 +59,7 @@ def app_for(name):
 
 
 def setup_status():
-    return {'version': '1.0.0', 'macOS': platform.mac_ver()[0],
+    return {'version': '1.0.1', 'macOS': platform.mac_ver()[0],
             'architecture': platform.machine(), 'python': platform.python_version(),
             'tools': {name: bool(executable_for(name)) for name in ('Claude', 'Codex', 'tmux')},
             'apps': {name: bool(app_for(name)) for name in ('Cursor', 'ChatGPT')},

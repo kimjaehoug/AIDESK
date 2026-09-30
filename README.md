@@ -4,12 +4,12 @@
 
 ## 설치
 
-[최신 릴리스](https://github.com/kimjaehoug/AIDESK/releases/latest)에서 `AI-Desk-1.0.0-universal.dmg`를 다운로드하고, DMG 안의 **AI Desk**를 **Applications**로 드래그하세요.
+[최신 릴리스](https://github.com/kimjaehoug/AIDESK/releases/latest)에서 `AI-Desk-1.0.1-universal.dmg`를 다운로드하고, DMG 안의 **AI Desk**를 **Applications**로 드래그하세요.
 
 - macOS 13 이상, Apple Silicon 및 Intel Mac용 universal 빌드
 - Python 실행 환경 포함
 - AI 서비스 로그인과 CLI 설치는 사용자별로 필요
-- 현재 v1.0.0은 Developer ID 서명과 Apple 공증 전입니다. 다른 Mac에서 실행이 차단될 수 있으며, 별도 Intel Mac에서의 실행 확인은 아직 진행하지 않았습니다.
+- 현재 v1.0.1은 Developer ID 서명과 Apple 공증 전입니다. 다른 Mac에서 실행이 차단될 수 있으며, 별도 Intel Mac에서의 실행 확인은 아직 진행하지 않았습니다.
 
 ## 주요 기능
 
@@ -42,3 +42,18 @@ python3 ai_dashboard/build_release.py \
 ```
 
 완성된 앱과 DMG는 Git 이력에 넣지 않고 GitHub Releases에 첨부합니다. 포함된 외부 라이브러리의 라이선스는 [`ai_dashboard/vendor`](ai_dashboard/vendor)와 배포 앱의 `PYTHON-LICENSE.txt`에 있습니다.
+
+## v1.0.1 설치 수정
+
+내장 Python 실행 파일 누락을 수정했고, 다른 경로로 복사한 앱의 서버 시작과 일정 저장을 검증했습니다. 빌더는 배포 전 격리된 임시 사용자 환경에서 실행 검증을 수행하며 실패하면 DMG를 만들지 않습니다.
+
+DMG의 드래그 설치 외에 소스 설치 도구도 사용할 수 있습니다. 이 도구는 완성된 앱 번들을 복사하며 개발자 Mac의 Python 경로를 사용하지 않습니다. 기존 앱은 이름을 바꿔 보관하고 일정 DB는 수정하지 않습니다.
+
+```sh
+python3 ai_dashboard/install.py \
+  --app-bundle '/path/to/AI Desk.app' \
+  --destination "$HOME/Applications/AI Desk.app" \
+  --verify
+```
+
+Codex 직접 전송은 `queue` 기능이 있는 CLI가 필요합니다. 실제 AI 응답 전송과 별도 Intel Mac에서의 동작은 이번 배포 검사에 포함하지 않았습니다.

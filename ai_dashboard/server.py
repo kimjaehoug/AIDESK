@@ -16,7 +16,7 @@ import time
 import urllib.parse
 import uuid
 from runtime import executable_for,app_for,setup_status
-from session_io import read_history,session_command,shell_command,TerminalSession
+from session_io import read_history,session_command,shell_command,TerminalSession,queue_codex_message
 from model import Store,local_sessions,remote_sessions,ssh_hosts,control_path
 
 ROOT=pathlib.Path(__file__).resolve().parent
@@ -150,7 +150,7 @@ class Handler(BaseHTTPRequestHandler):
      if 'start' in query and 'end' in query:store.ensure_routine_range(query['start'][0],query['end'][0])
      else:store.ensure_routines(month)
      local,remote,favorites=session_view()
-     self.respond(dict(tasks=store.tasks(),routines=store.routines(),favorites=favorites,settings={'theme':store.setting('theme','light'),'session_auto':store.setting('session_auto',True),'session_interval':store.setting('session_interval',30),'planner_view':store.setting('planner_view','day'),'chat_font':store.setting('chat_font',12),'trusted_auto_folders':store.setting('trusted_auto_folders',[]),'ui_motion':store.setting('ui_motion',True),'ui_stream':store.setting('ui_stream',True),'stream_speed':store.setting('stream_speed',360),'onboarding_complete':store.setting('onboarding_complete',False)},local=local,hosts=hosts,remote=remote,statuses=statuses,errors=errors,refreshed=refreshed,refreshing=list(busy)+(['local'] if local_busy else []),local_error=local_error))
+     self.respond(dict(tasks=store.tasks(),routines=store.routines(),favorites=favorites,capabilities={"codex_messages":True},settings={'theme':store.setting('theme','light'),'session_auto':store.setting('session_auto',True),'session_interval':store.setting('session_interval',30),'planner_view':store.setting('planner_view','day'),'chat_font':store.setting('chat_font',12),'trusted_auto_folders':store.setting('trusted_auto_folders',[]),'ui_motion':store.setting('ui_motion',True),'ui_stream':store.setting('ui_stream',True),'stream_speed':store.setting('stream_speed',360),'onboarding_complete':store.setting('onboarding_complete',False)},local=local,hosts=hosts,remote=remote,statuses=statuses,errors=errors,refreshed=refreshed,refreshing=list(busy)+(['local'] if local_busy else []),local_error=local_error))
    except ValueError as error:self.respond({'error':str(error)},400)
   else:self.respond({'error':'Not found'},404)
  def do_POST(self):
@@ -160,6 +160,8 @@ class Handler(BaseHTTPRequestHandler):
    if length>200000:raise ValueError('입력이 너무 깁니다.')
    body=json.loads(self.rfile.read(length));route=self.path
    if route=='/api/history':self.respond(read_history(resolve_session(body)));return
+   if route=='/api/codex/send':
+    self.respond(queue_codex_message(resolve_session(body),body.get('text')));return
    if route=='/api/shell/start':
     session=resolve_session(body);key=('shell',session['host'],session.get('cwd',''))
     with mutex:
