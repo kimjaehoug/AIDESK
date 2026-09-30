@@ -1,0 +1,29 @@
+# Generated files and local build outputs
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+ai_dashboard/DesktopHost
+ai_dashboard/dist/
+*.app/
+*.dmg
+*.pkg
+
+# User data, credentials, and local diagnostics
+.env
+.env.*
+!.env.example
+*.sqlite*
+*.db
+*.db-*
+*.log
+*.sock
+*.jsonl
+*.pem
+*.key
+.ssh/
+.claude/
+.codex/
+.agents/
+runtime-data/
