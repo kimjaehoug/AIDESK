@@ -124,6 +124,10 @@ def terminal_by_id(key):
  if term is None:raise ValueError('터미널 연결을 찾지 못했습니다.')
  return term
 
+class DashboardServer(ThreadingHTTPServer):
+ # History, terminal output and planner refreshes arrive together from WebKit.
+ request_queue_size=128
+
 class Handler(BaseHTTPRequestHandler):
  def log_message(self,*args):pass
  def respond(self,value,status=200):
@@ -284,7 +288,7 @@ if __name__=='__main__':
  lock=(DATA/'instance.lock').open('w')
  try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
  except BlockingIOError:raise SystemExit(0)
- http=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+ http=DashboardServer(('127.0.0.1',0),Handler)
  threading.Thread(target=http.serve_forever,daemon=True).start();threading.Thread(target=monitor,daemon=True).start()
  for host in hosts:connect(host)
  url=f'http://127.0.0.1:{http.server_port}/?token={TOKEN}'

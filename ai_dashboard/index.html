@@ -92,7 +92,21 @@ dialog[open]{animation:desk-dialog .3s var(--ease-out) both}dialog::backdrop{ani
 const TOKEN='__TOKEN__';const $=id=>document.getElementById(id);let state={tasks:[],routines:[],favorites:[],local:[],hosts:[],remote:{},statuses:{},errors:{},refreshed:{},refreshing:[],settings:{theme:'light',session_auto:true,session_interval:30,planner_view:'day'}},selectedDay=today(),month=new Date(new Date().getFullYear(),new Date().getMonth(),1),currentHost='local',selectedSession=null,editingTask=null,composeProvider=null,undoId=null,embedded=true,toastTimer;
 function today(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
 function parseDay(d){return new Date(d+'T12:00:00')}function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-async function api(path,body){const options={headers:{'X-AI-Desk-Token':TOKEN}};if(body!==undefined){options.method='POST';options.headers['Content-Type']='application/json';options.body=JSON.stringify(body)}const r=await fetch('/api/'+path,options);const value=await r.json();if(!r.ok)throw Error(value.error||'요청 오류');return value}
+async function api(path,body){
+ const options={headers:{'X-AI-Desk-Token':TOKEN},cache:'no-store'};
+ if(body!==undefined){options.method='POST';options.headers['Content-Type']='application/json';options.body=JSON.stringify(body)}
+ for(let attempt=0;attempt<3;attempt++){
+  let r;
+  try{r=await fetch('/api/'+path,options)}
+  catch(error){
+   // Only reads can be retried: replaying a message or approval can execute it twice.
+   if(body===undefined&&attempt<2){await new Promise(resolve=>setTimeout(resolve,250*(attempt+1)));continue}
+   throw Error(body===undefined?'대시보드 연결이 끊겼습니다. AI Desk를 다시 열어 주세요.':'요청 전달을 확인하지 못했습니다. 중복 실행을 피하려면 수신 여부를 확인한 뒤 다시 시도하세요.');
+  }
+  let value;try{value=await r.json()}catch{throw Error('대시보드 응답을 읽지 못했습니다. 연결 상태를 확인해 주세요.')}
+  if(!r.ok)throw Error(value.error||'요청 오류');return value;
+ }
+}
 function toast(text){$('toast').textContent=text;$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),7000)}
 
 let onboardingOffered=false;let plannerView='day',plannerPreferenceLoaded=false,stateGeneration=0;const paintSignatures={};

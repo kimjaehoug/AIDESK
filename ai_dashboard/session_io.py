@@ -233,6 +233,7 @@ class TerminalSession:
     def __init__(self,args,cwd,cols=100,rows=28):
         self.id=uuid.uuid4().hex;self.lock=threading.RLock();self.chunks=collections.deque();self.bytes=0;self.seq=0;self.closed=False
         self.master,slave=os.openpty()
+        os.set_blocking(self.master,False)
         fcntl.ioctl(self.master,termios.TIOCSWINSZ,struct.pack('HHHH',rows,cols,0,0))
         env=dict(os.environ,TERM='xterm-256color',COLORTERM='truecolor',LANG='en_US.UTF-8')
         try:self.proc=subprocess.Popen([sys.executable,str(ROOT/'pty_helper.py'),*args],cwd=cwd,env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True,close_fds=True)
@@ -242,12 +243,21 @@ class TerminalSession:
     def reader(self):
         try:
             while True:
-                block=os.read(self.master,65536)
-                if not block:break
                 with self.lock:
+                    if self.closed:return
+                    fd=self.master
+                ready,_,_=select.select([fd],[],[],.2)
+                if not ready:continue
+                # close() shares this lock. Never read a descriptor after close:
+                # macOS can reuse its number for a dashboard HTTP connection.
+                with self.lock:
+                    if self.closed:return
+                    try:block=os.read(fd,65536)
+                    except BlockingIOError:continue
+                    if not block:return
                     self.seq+=1;self.chunks.append((self.seq,block));self.bytes+=len(block)
                     while self.bytes>8*1024*1024:self.bytes-=len(self.chunks.popleft()[1])
-        except OSError:pass
+        except (OSError,ValueError):pass
     def read(self,cursor):
         with self.lock:
             blocks=[];size=0;next_cursor=cursor
@@ -257,14 +267,22 @@ class TerminalSession:
                 if size>=512000:break
             return {'data':base64.b64encode(b''.join(blocks)).decode(),'cursor':next_cursor,'running':self.proc.poll() is None,'exitCode':self.proc.poll(),'reset':bool(self.chunks and cursor and cursor<self.chunks[0][0]-1)}
     def write(self,data):
-        if self.proc.poll() is not None:raise ValueError('세션 연결이 종료되었습니다. 다시 연결하세요.')
         raw=data.encode('utf-8')
         if len(raw)>100000:raise ValueError('한 번에 입력할 수 있는 길이를 초과했습니다.')
-        with self.lock:
-            while raw:written=os.write(self.master,raw);raw=raw[written:]
+        deadline=time.monotonic()+5
+        while raw:
+            with self.lock:
+                if self.closed or self.proc.poll() is not None:raise ValueError('세션 연결이 종료되었습니다. 다시 연결하세요.')
+                try:written=os.write(self.master,raw)
+                except BlockingIOError:written=0
+                raw=raw[written:]
+            if raw:
+                if time.monotonic()>deadline:raise RuntimeError('입력 전달 시간이 초과되었습니다. 수신 여부를 확인한 뒤 다시 보내세요.')
+                time.sleep(.01)
     def resize(self,cols,rows):
         cols=max(2,min(400,int(cols)));rows=max(1,min(150,int(rows)))
-        if not self.closed:fcntl.ioctl(self.master,termios.TIOCSWINSZ,struct.pack('HHHH',rows,cols,0,0))
+        with self.lock:
+            if not self.closed:fcntl.ioctl(self.master,termios.TIOCSWINSZ,struct.pack('HHHH',rows,cols,0,0))
     def send_message(self,text,bracketed=False):
         if not isinstance(text,str) or not text.strip():raise ValueError('메시지를 입력하세요.')
         text=text.replace('\r\n','\n').replace('\r','\n')
@@ -276,10 +294,13 @@ class TerminalSession:
         time.sleep(.15)
         self.write('\r')
     def close(self):
-        if self.closed:return
-        self.closed=True
-        if self.proc.poll() is None:
-            try:os.killpg(self.proc.pid,signal.SIGHUP)
-            except ProcessLookupError:pass
-        try:os.close(self.master)
-        except OSError:pass
+        # Multiple requests can close the same terminal. Claim and close it
+        # exactly once, before another socket can reuse its descriptor number.
+        with self.lock:
+            if self.closed:return
+            self.closed=True
+            if self.proc.poll() is None:
+                try:os.killpg(self.proc.pid,signal.SIGHUP)
+                except ProcessLookupError:pass
+            try:os.close(self.master)
+            except OSError:pass
