@@ -382,7 +382,7 @@ async function respondInteraction(expected,choice){
 }
 
 function resetTerminal(){clearInteraction();liveModel=null;renderSessionModel();autoTrustEnabled=Boolean(deskSession&&state.settings.trusted_auto_folders?.some(v=>{try{const [host,cwd]=JSON.parse(v);return host===deskSession.host&&cwd===deskSession.cwd}catch{return false}}));autoTrustCwd=deskSession?.cwd||'';trustHandled=false;$('terminalDrawer').classList.remove('trust-prompt');clearTimeout(liveHistoryTimer);$('terminalDrawer').open=deskSession?.provider==='tmux';oauthLoginURL=null;$('oauthOpen').style.display='none';terminalGeneration++;clearTimeout(terminalTimer);if(terminal)terminal.dispose();terminal=null;terminalId=null;terminalCursor=0;$('stopChat').style.display='none';$('startChat').style.display='block';$('liveStatus').textContent='연결 전';$('liveStatus').classList.remove('connected');syncComposer();$('terminalWrap').innerHTML='<div class="terminal-placeholder">채팅 연결을 누르면 선택한 세션을 이어서 엽니다.<br><br>이 화면을 접어도 실행 중인 연결은 유지됩니다. 연결 종료를 누르면 대시보드에서 실행한 프로세스를 종료합니다.</div>'}
-const chatWanted=new Set();let chatReconnectTimer=null,chatReconnectAttempt=0,chatStartGeneration=0,chatConnectedAt=0;
+const chatWanted=new Set();let chatReconnectTimer=null,chatReconnectAttempt=0,chatStartGeneration=0,chatConnectedAt=0,terminalReadFailures=0;
 function cancelChatReconnect(){clearTimeout(chatReconnectTimer);chatReconnectTimer=null}
 function activeChat(key){return deskSession&&sessionKey(deskSession)===key&&$('sessionDesk').style.display==='flex'}
 function scheduleChatReconnect(key,reason){
@@ -403,7 +403,7 @@ async function startChat(automatic=false){
  finally{if(request===chatStartGeneration)$('startChat').disabled=deskSession?.provider==='Cursor'}
 }
 function attachTerminal(id){
- resetTerminal();terminalId=id;$('terminalWrap').innerHTML='';terminal=new Terminal({fontSize:13,fontFamily:'Menlo, Monaco, monospace',lineHeight:1.15,cursorBlink:true,scrollback:10000,theme:{background:'#111720',foreground:'#e0e8f4',cursor:'#9ddbbd',selectionBackground:'#3c5268'}});terminal.open($('terminalWrap'));$('startChat').style.display='none';$('stopChat').style.display='block';$('liveStatus').textContent='● 연결됨 · 자동 재연결 ON';$('liveStatus').classList.add('connected');syncComposer();refreshLiveHistory();
+ resetTerminal();terminalReadFailures=0;terminalId=id;$('terminalWrap').innerHTML='';terminal=new Terminal({fontSize:13,fontFamily:'Menlo, Monaco, monospace',lineHeight:1.15,cursorBlink:true,scrollback:10000,theme:{background:'#111720',foreground:'#e0e8f4',cursor:'#9ddbbd',selectionBackground:'#3c5268'}});terminal.open($('terminalWrap'));$('startChat').style.display='none';$('stopChat').style.display='block';$('liveStatus').textContent='● 연결됨 · 자동 재연결 ON';$('liveStatus').classList.add('connected');syncComposer();refreshLiveHistory();
  terminal.onData(data=>{inputQueue=inputQueue.catch(()=>{}).then(()=>api('terminal/input',{id,data})).catch(e=>toast(e.message))});fitTerminal();requestAnimationFrame(fitTerminal);$('chatInput').focus();pollTerminal(++terminalGeneration);
 }
 function fitTerminalViewport(term,box,id){
@@ -421,8 +421,17 @@ function fitTerminal(){if($('sessionDesk').style.display==='flex')fitTerminalVie
 async function pollTerminal(generation){
  if(generation!==terminalGeneration||!terminalId)return;
  const key=sessionKey(deskSession);
- try{const r=await api(`terminal/read?id=${encodeURIComponent(terminalId)}&cursor=${terminalCursor}`);if(generation!==terminalGeneration)return;terminalCursor=r.cursor;if(r.reset)terminal.write('\r\n[오래된 출력 일부는 버퍼에서 제외되었습니다.]\r\n');if(r.data){const raw=atob(r.data);terminal.write(Uint8Array.from(raw,c=>c.charCodeAt(0)),()=>{if(generation===terminalGeneration){scanOAuthLogin();scanClaudeModel();handleKnownTrustPrompt();scanInteraction();scanConversationStream()}})}if(!r.running){scheduleChatReconnect(key,`채팅 연결이 종료되었습니다 (${r.exitCode??'연결 끊김'}).`);return}if(Date.now()-chatConnectedAt>30000)chatReconnectAttempt=0;terminalTimer=setTimeout(()=>pollTerminal(generation),180);
- }catch(e){if(generation===terminalGeneration)scheduleChatReconnect(key,e.message)}
+ try{const r=await api(`terminal/read?id=${encodeURIComponent(terminalId)}&cursor=${terminalCursor}`);if(generation!==terminalGeneration)return;terminalReadFailures=0;terminalCursor=r.cursor;if(r.reset)terminal.write('\r\n[오래된 출력 일부는 버퍼에서 제외되었습니다.]\r\n');if(r.data){const raw=atob(r.data);terminal.write(Uint8Array.from(raw,c=>c.charCodeAt(0)),()=>{if(generation===terminalGeneration){scanOAuthLogin();scanClaudeModel();handleKnownTrustPrompt();scanInteraction();scanConversationStream()}})}if(!r.running){scheduleChatReconnect(key,`채팅 연결이 종료되었습니다 (${r.exitCode??'연결 끊김'}).`);return}if(Date.now()-chatConnectedAt>30000)chatReconnectAttempt=0;terminalTimer=setTimeout(()=>pollTerminal(generation),180);
+ }catch(e){
+  if(generation!==terminalGeneration)return;
+  // A failed screen read does not mean the CLI has stopped. Keep its id and
+  // cursor so we can resume reading without losing input or claiming a new session.
+  if(++terminalReadFailures<4){
+   $('liveStatus').textContent='출력 연결 복구 중…';
+   terminalTimer=setTimeout(()=>pollTerminal(generation),Math.min(4000,500*terminalReadFailures));return;
+  }
+  scheduleChatReconnect(key,e.message);
+ }
 }
 async function stopChat(){
  if(!deskSession)return;const key=sessionKey(deskSession),id=terminalId||connections.get(key);chatWanted.delete(key);connections.delete(key);streamTurns.delete(key);removeLiveReply();cancelChatReconnect();chatStartGeneration++;resetTerminal();$('startChat').disabled=deskSession.provider==='Cursor';$('startChat').textContent='다시 연결';$('chatFeedback').textContent='연결을 종료했습니다. 자동 재연결이 중지되었습니다.';

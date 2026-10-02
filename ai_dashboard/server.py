@@ -127,6 +127,17 @@ def terminal_by_id(key):
 class DashboardServer(ThreadingHTTPServer):
  # History, terminal output and planner refreshes arrive together from WebKit.
  request_queue_size=128
+ def handle_error(self,request,client_address):
+  self.socket_error_count=getattr(self,'socket_error_count',0)+1
+  now=time.monotonic()
+  if now-getattr(self,'last_socket_error_log',0)<30:return
+  self.last_socket_error_log=now
+  fd=request.fileno()
+  try:os.fstat(fd);valid=True
+  except OSError:valid=False
+  with mutex:active=[{'fd':t.master,'closed':t.closed,'running':t.proc.poll() is None} for t in terminals.values()]
+  print(json.dumps({'event':'http_socket_error','time':dt.datetime.now().isoformat(),'count':self.socket_error_count,'fd':fd,'valid':valid,'terminals':active}),file=sys.stderr,flush=True)
+  super().handle_error(request,client_address)
 
 class Handler(BaseHTTPRequestHandler):
  def log_message(self,*args):pass
@@ -170,7 +181,7 @@ class Handler(BaseHTTPRequestHandler):
     session=resolve_session(body);key=('shell',session['host'],session.get('cwd',''))
     with mutex:
      term=terminals.get(session_terminals.get(key))
-     if term is None or term.proc.poll() is not None:
+     if term is None or term.closed or term.proc.poll() is not None:
       if term is not None:term.close();terminals.pop(term.id,None)
       if len(terminals)>=12:raise ValueError('열린 연결이 많습니다. 사용하지 않는 연결을 종료하세요.')
       args,cwd=shell_command(session);term=TerminalSession(args,cwd,cols=45,rows=35);terminals[term.id]=term;session_terminals[key]=term.id
@@ -189,7 +200,7 @@ class Handler(BaseHTTPRequestHandler):
     session=resolve_session(body);key=tuple(session[k] for k in ('provider','host','id'))
     with mutex:
      term=terminals.get(session_terminals.get(key))
-     if term is None or term.proc.poll() is not None:
+     if term is None or term.closed or term.proc.poll() is not None:
       if term is not None:term.close();terminals.pop(term.id,None)
       if len(terminals)>=12:raise ValueError('열린 연결이 많습니다. 사용하지 않는 연결을 종료하세요.')
       args,cwd=session_command(session);term=TerminalSession(args,cwd);terminals[term.id]=term;session_terminals[key]=term.id
